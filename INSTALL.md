@@ -1,4 +1,4 @@
-# Cara Install MeowMate 🐱
+# Cara Install Mochi 🐱
 
 Sekarang setelah aplikasimu jauh lebih canggih, kamu mungkin ingin menjalankannya secara otomatis atau menjadikannya aplikasi mandiri (`.exe`)! Berikut adalah panduannya:
 
@@ -18,7 +18,7 @@ Jika kamu ingin membuat file `.exe` yang bisa diklik dua kali (tanpa perlu membu
 4. Tunggu prosesnya selesai. Kamu akan menemukan file `main.exe` di dalam folder `dist`. Pindahkan file tersebut dan folder `assets` ke manapun kamu mau!
 
 ## Opsi 2: Berjalan Otomatis Saat Komputer Nyala
-Jika kamu ingin MeowMate selalu menemanimu sejak kamu menyalakan komputer:
+Jika kamu ingin Mochi selalu menemanimu sejak kamu menyalakan komputer:
 
 1. Tekan tombol `Windows + R` di keyboardmu.
 2. Ketik `shell:startup` dan tekan Enter. Folder *Startup* Windows akan terbuka.

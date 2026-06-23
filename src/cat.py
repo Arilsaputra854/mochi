@@ -1,4 +1,5 @@
 import os
+import math
 import tkinter as tk
 from enum import Enum
 
@@ -7,6 +8,8 @@ class State(Enum):
     IDLE        = 'idle'
     WALK_LEFT   = 'walk_left'
     WALK_RIGHT  = 'walk_right'
+    RUN_LEFT    = 'run_left'
+    RUN_RIGHT   = 'run_right'
     SLEEP_ENTER = 'sleep_enter'
     SLEEPING    = 'sleeping'
     SLEEP_EXIT  = 'sleep_exit'
@@ -32,6 +35,7 @@ class State(Enum):
     SCRATCH     = 'scratch'
     WAVE        = 'wave'
     HISS        = 'hiss'
+    THINKING    = 'thinking'
 
 
 _SPRITE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'assets', 'sprites')
@@ -48,6 +52,7 @@ def _load(pattern, count):
 
 class Cat:
     WALK_SPEED  = 3
+    RUN_SPEED   = 9
     MARGIN      = 5
     SPRITE_W    = 96
     SPRITE_H    = 96
@@ -74,6 +79,8 @@ class Cat:
             State.IDLE: 4,         # 200ms per frame
             State.WALK_LEFT: 3,    # 150ms per frame
             State.WALK_RIGHT: 3,   # 150ms per frame
+            State.RUN_LEFT:  1,    # 50ms per frame (full sprint!)
+            State.RUN_RIGHT: 1,    # 50ms per frame
             State.SLEEP_ENTER: 4,  # 200ms per frame
             State.SLEEPING: 8,     # 400ms per frame
             State.SLEEP_EXIT: 4,   # 200ms per frame
@@ -99,6 +106,7 @@ class Cat:
             State.SCRATCH: 2,
             State.WAVE:    3,
             State.HISS:    2,
+            State.THINKING: 3,  # reuse scratch pose as a 'thinking' loop
         }
 
         self._look_frames = {}
@@ -108,10 +116,15 @@ class Cat:
         sleeping_enter = _load('sleeping', 6)
         sleeping_exit  = sleeping_enter[::-1]
 
+        walk_left_frames  = _load('walk_left', 6)
+        walk_right_frames = _load('walk_right', 6)
+
         self._frames = {
             State.IDLE:        _load('idle', 6),
-            State.WALK_LEFT:   _load('walk_left', 6),
-            State.WALK_RIGHT:  _load('walk_right', 6),
+            State.WALK_LEFT:   walk_left_frames,
+            State.WALK_RIGHT:  walk_right_frames,
+            State.RUN_LEFT:    walk_left_frames,   # same sprites, 3x faster + 3x speed
+            State.RUN_RIGHT:   walk_right_frames,
             State.SLEEP_ENTER: sleeping_enter,
             State.SLEEPING:    _load('zzz', 4),
             State.SLEEP_EXIT:  sleeping_exit,
@@ -127,20 +140,24 @@ class Cat:
             State.PAT:         _load('pat', 8),
             State.FALLING:     _load('falling', 2),
             State.LANDING:     _load('landing', 3),
-            State.DANCE:       _load('dance', 8),
-            State.SCARE:       _load('scare', 6),
-            State.YAWN:        _load('yawn', 4),
+            State.DANCE:       _load('dance', 11),
+            State.SCARE:       _load('scare', 9),
+            State.YAWN:        _load('yawn', 7),
             State.STRETCH:     _load('stretch', 5),
-            State.CLEAN:       _load('clean', 5),
-            State.JUMP:        _load('jump', 4),
-            State.SIT:         _load('sit', 3),
+            State.CLEAN:       _load('clean', 6),
+            State.JUMP:        _load('jump', 6),
+            State.SIT:         _load('sit', 4),
             State.SCRATCH:     _load('scratch', 6),
             State.WAVE:        _load('wave', 6),
-            State.HISS:        _load('hiss', 7),
+            State.HISS:        _load('hiss', 13),
+            State.THINKING:    _load('scratch', 6),  # same sprites, used as thinking
         }
 
     def set_state(self, new_state: State):
         if self.state != new_state:
+            # Leaving a jump → make sure the cat lands back on the floor.
+            if self.state == State.JUMP:
+                self.y = self.screen_h - self.SPRITE_H
             self.state      = new_state
             self._frame_idx = 0
             self._tick_counter = 0
@@ -224,18 +241,29 @@ class Cat:
                 if self.on_anim_end:
                     self.on_anim_end(self.state)
 
-        # Slow down walking speed during weekday sleepy hours (9 PM to 4 AM)
-        speed = self.WALK_SPEED
+        # Real jump: arc the cat up and back down over each animation loop.
+        if self.state == State.JUMP:
+            floor = self.screen_h - self.SPRITE_H
+            prog  = (self._frame_idx + self._tick_counter / max(1, delay)) / len(frames)
+            lift  = math.sin(math.pi * prog) * 40  # peak ~40px off the floor
+            self.y = floor - int(lift)
+
         if self.state in (State.WALK_LEFT, State.WALK_RIGHT):
             import datetime
             now = datetime.datetime.now()
+            speed = self.WALK_SPEED
             if now.weekday() < 5 and (now.hour >= 21 or now.hour < 4):
-                speed = 1  # walk very slowly
+                speed = 1  # walk very slowly at bedtime
+            if self.state == State.WALK_LEFT:
+                self.x = max(self.screen_x + self.MARGIN, self.x - speed)
+            else:
+                self.x = min(self.screen_w - self.SPRITE_W - self.MARGIN, self.x + speed)
 
-        if self.state == State.WALK_LEFT:
-            self.x = max(self.screen_x + self.MARGIN, self.x - speed)
-        elif self.state == State.WALK_RIGHT:
-            self.x = min(self.screen_w - self.SPRITE_W - self.MARGIN, self.x + speed)
+        elif self.state in (State.RUN_LEFT, State.RUN_RIGHT):
+            if self.state == State.RUN_LEFT:
+                self.x = max(self.screen_x + self.MARGIN, self.x - self.RUN_SPEED)
+            else:
+                self.x = min(self.screen_w - self.SPRITE_W - self.MARGIN, self.x + self.RUN_SPEED)
 
     def at_edge(self):
         return (self.x <= self.screen_x + self.MARGIN or
