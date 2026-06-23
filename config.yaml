@@ -1,0 +1,15 @@
+animation:
+  frame_delay_ms: 50
+  walk_speed_px: 3
+
+behavior:
+  idle_to_sleep_secs: 45
+  sleep_min_secs: 15
+  walk_steps_range: [30, 80]
+  typing_burst_threshold: 10
+
+window:
+  width: 72
+  height: 64
+  transparent_color: "black"
+  always_on_top: true
