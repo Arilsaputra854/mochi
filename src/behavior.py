@@ -378,8 +378,6 @@ class Behavior:
         self._last_active = time.time()
         self._idle_ticks  = 0
         is_wk, hr, mn    = self._get_time_info()
-        today             = datetime.date.today()
-        is_pouting        = self._pushed_pulang_later and today == self._pulang_date
 
         # Anger still active — stay angry
         if self._anger_ticks > 0:
@@ -403,7 +401,7 @@ class Behavior:
             if r < (0.60 + (0.30 if low_energy else 0.0)):
                 self._enter_sleep()
             elif r < 0.90:
-                self.cat.set_state(State.BETE if is_pouting else State.IDLE)
+                self.cat.set_state(State.IDLE)
             else:
                 direction = random.choice([State.WALK_LEFT, State.WALK_RIGHT])
                 self.cat.set_state(direction)
@@ -417,9 +415,7 @@ class Behavior:
 
         r = random.random()
 
-        if is_pouting:
-            self.cat.set_state(State.BETE)
-        elif r < sleep_w:
+        if r < sleep_w:
             self._enter_sleep()
         elif r < sleep_w + 0.27:
             self.cat.set_state(State.IDLE)
