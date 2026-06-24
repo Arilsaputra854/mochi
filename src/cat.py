@@ -2,6 +2,7 @@ import os
 import math
 import tkinter as tk
 from enum import Enum
+from src.paths import get_base_dir
 
 
 class State(Enum):
@@ -40,7 +41,7 @@ class State(Enum):
     CLIMBING    = 'climbing'
 
 
-_SPRITE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'assets', 'sprites')
+_SPRITE_DIR = os.path.join(get_base_dir(), 'assets', 'sprites')
 
 
 def _load(pattern, count):

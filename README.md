@@ -101,19 +101,27 @@ Toggle via tray icon → **Kesehatan 💪**, atau ubah interval di `~/.mochi/con
 
 ---
 
-## Jadikan .exe (opsional)
+## Build .exe (standalone, tanpa Python)
+
+Jalankan `build.bat` (double-click atau lewat terminal):
+
+```bat
+build.bat
+```
+
+Atau manual:
 
 ```bash
 pip install pyinstaller
-pyinstaller --noconsole --onefile --add-data "assets;assets" main.py
+pyinstaller mochi.spec --clean
 ```
 
-File `dist/main.exe` bisa dipindahkan ke folder manapun (pastikan folder `assets` ikut).
+Output: `dist/Mochi.exe` — satu file, tidak perlu Python terinstall, siap dibagikan.
 
 ### Auto-start saat Windows nyala
 
 1. `Win + R` → ketik `shell:startup` → Enter
-2. Buat shortcut dari `main.exe` ke folder Startup tersebut
+2. Buat shortcut dari `dist/Mochi.exe` ke folder Startup tersebut
 
 ---
 

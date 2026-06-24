@@ -1,5 +1,6 @@
 import os
 import threading
+from src.paths import get_base_dir
 
 try:
     import pystray
@@ -8,10 +9,7 @@ try:
 except ImportError:
     _HAS_TRAY = False
 
-_ICON_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)),
-    'assets', 'icons', 'tray_icon.png'
-)
+_ICON_PATH = os.path.join(get_base_dir(), 'assets', 'icons', 'tray_icon.png')
 
 
 class TrayIcon:
