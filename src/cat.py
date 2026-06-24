@@ -36,6 +36,8 @@ class State(Enum):
     WAVE        = 'wave'
     HISS        = 'hiss'
     THINKING    = 'thinking'
+    CLINGING    = 'clinging'
+    CLIMBING    = 'climbing'
 
 
 _SPRITE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'assets', 'sprites')
@@ -107,6 +109,8 @@ class Cat:
             State.WAVE:    3,
             State.HISS:    2,
             State.THINKING: 3,  # reuse scratch pose as a 'thinking' loop
+            State.CLINGING: 4,  # 200ms per frame
+            State.CLIMBING: 3,  # 150ms per frame
         }
 
         self._look_frames = {}
@@ -151,6 +155,8 @@ class Cat:
             State.WAVE:        _load('wave', 6),
             State.HISS:        _load('hiss', 13),
             State.THINKING:    _load('scratch', 6),  # same sprites, used as thinking
+            State.CLINGING:    _load('clinging', 6),
+            State.CLIMBING:    _load('climbing', 6),
         }
 
     def set_state(self, new_state: State):
@@ -265,12 +271,24 @@ class Cat:
             else:
                 self.x = min(self.screen_w - self.SPRITE_W - self.MARGIN, self.x + self.RUN_SPEED)
 
+        elif self.state == State.CLIMBING:
+            # Move up the wall on the right edge
+            self.x = self.screen_w - self.SPRITE_W
+            self.y -= 2
+            # If we reach the top, snap and cling!
+            if self.y <= self.screen_y:
+                self.y = self.screen_y
+                self.set_state(State.CLINGING)
+
     def at_edge(self):
         return (self.x <= self.screen_x + self.MARGIN or
                 self.x >= self.screen_w - self.SPRITE_W - self.MARGIN)
 
     def snap_to_floor(self):
         self.y = self.screen_h - self.SPRITE_H
+
+    def snap_to_ceiling(self):
+        self.y = self.screen_y
 
     def clamp(self):
         # Update monitor based on current self.x, self.y so dragging works across screens!

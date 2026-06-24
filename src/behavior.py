@@ -3,6 +3,21 @@ import time
 import datetime
 from src.cat import Cat, State
 
+_ACTION_MAP = {
+    'IDLE':       State.IDLE,
+    'WALK_LEFT':  State.WALK_LEFT,
+    'WALK_RIGHT': State.WALK_RIGHT,
+    'PLAYING':    State.PLAYING,
+    'DANCE':      State.DANCE,
+    'YAWN':       State.YAWN,
+    'STRETCH':    State.STRETCH,
+    'CLEAN':      State.CLEAN,
+    'JUMP':       State.JUMP,
+    'SIT':        State.SIT,
+    'SCRATCH':    State.SCRATCH,
+    'WAVE':       State.WAVE,
+}
+
 
 class Behavior:
     IDLE_TO_SLEEP   = 120    # seconds idle before auto-sleep
@@ -19,9 +34,10 @@ class Behavior:
     PLAY_BUILD      = 0.003  # per tick (~100 units over 25 min)
     PLAY_DRAIN      = 0.030  # per tick (~100 units over 3 min of play)
 
-    def __init__(self, cat: Cat, sound=None):
+    def __init__(self, cat: Cat, sound=None, config=None):
         self.cat               = cat
         self.sound             = sound
+        self.config            = config
         self._last_active      = time.time()
         self._last_typing_time = 0.0
         self._walk_steps       = 0
@@ -49,7 +65,17 @@ class Behavior:
         self._pulang_date         = None
         self._pushed_pulang_later = False
 
-        self.on_pulang_trigger = None
+        # LLM autonomous action state
+        self._llm_pending          = False
+        self._last_llm_action_time = 0.0
+
+        # Clinging
+        self._cling_ticks = 0
+
+        # Callbacks set by PetWindow
+        self.on_pulang_trigger    = None
+        self.on_need_llm_action   = None  # fn(context_dict) — window handles async LLM call
+
         cat.on_anim_end = self._on_anim_end
         self._choose_action()
 
@@ -80,6 +106,18 @@ class Behavior:
         state = self.cat.state
 
         if state in (State.FALLING, State.LANDING):
+            return
+
+        if state == State.CLINGING:
+            self._cling_ticks += 1
+            if self._cling_ticks > random.randint(120, 300):
+                self._cling_ticks = 0
+                self.cat.set_state(State.FALLING)
+            return
+
+        if state == State.CLIMBING:
+            if self.cat.y <= self.cat.screen_y:
+                self._start_clinging()
             return
 
         # Hold the thinking pose until the LLM answer arrives (no auto actions,
@@ -247,7 +285,12 @@ class Behavior:
 
     def on_clicked(self):
         self._last_active = time.time()
-        if self.cat.state in (State.SLEEPING, State.SLEEP_ENTER):
+        if self.cat.state in (State.CLINGING, State.CLIMBING):
+            if hasattr(self, '_cling_ticks'):
+                self._cling_ticks = 0
+            self.cat.set_state(State.FALLING)
+            self._sfx('meow')
+        elif self.cat.state in (State.SLEEPING, State.SLEEP_ENTER):
             self._wake_with_anger()
         elif self.cat.state in (State.HUNGRY, State.PULANG, State.THINKING):
             pass  # busy — don't interrupt
@@ -374,7 +417,83 @@ class Behavior:
         elif state in (State.CLICKED, State.MOUSE_CLICK, State.PAT, State.LANDING):
             self._choose_action()
 
+    # ── LLM autonomous action ─────────────────────────────────────────────────
+
+    def _llm_autonomous_enabled(self):
+        if self.config is None:
+            return False
+        return bool(self.config.get('llm_autonomous'))
+
+    def _llm_action_cooldown(self):
+        if self.config:
+            v = self.config.get('llm_action_cooldown')
+            if v is not None:
+                return float(v)
+        return 45.0
+
+    def _build_llm_context(self):
+        now    = datetime.datetime.now()
+        is_wk, hr, mn = self._get_time_info()
+        return {
+            'time':         now.strftime('%H:%M, %A'),
+            'weekday':      is_wk,
+            'energy':       round(self._energy, 1),
+            'play_need':    round(self._play_need, 1),
+            'last_action':  self.cat.state.name,
+            'user_typing':  (time.time() - self._last_typing_time) < 5.0,
+        }
+
+    def apply_llm_action(self, action_name, ticks=200):
+        """Called by PetWindow when LLM returns an action decision."""
+        self._llm_pending          = False
+        self._last_llm_action_time = time.time()
+        self._last_active          = time.time()
+
+        key   = (action_name or 'IDLE').upper()
+        state = _ACTION_MAP.get(key)
+
+        if key == 'SLEEPING':
+            self._enter_sleep()
+            return
+        if state is None:
+            self._choose_action_legacy()
+            return
+
+        if state in (State.WALK_LEFT, State.WALK_RIGHT):
+            self.cat.set_state(state)
+            self._walk_steps = random.randint(self.WALK_MIN, self.WALK_MAX)
+        else:
+            self.cat.set_state(state)
+            self._play_ticks = ticks
+
+    def apply_llm_action_fallback(self):
+        """Called when LLM is unavailable or errored — fall back to random logic."""
+        self._llm_pending          = False
+        self._last_llm_action_time = time.time()  # reset cooldown so we don't hammer LLM
+        self._choose_action_legacy()
+
+    # ── Action selection (hybrid LLM + legacy) ────────────────────────────────
+
     def _choose_action(self):
+        self._idle_ticks = 0
+
+        # If a previous LLM call is still in-flight, don't interrupt current state.
+        if self._llm_pending:
+            return
+
+        # Try LLM if autonomous mode is on and cooldown has elapsed.
+        now = time.time()
+        if (self._llm_autonomous_enabled()
+                and self.on_need_llm_action is not None
+                and now - self._last_llm_action_time >= self._llm_action_cooldown()):
+            self._llm_pending = True
+            self.on_need_llm_action(self._build_llm_context())
+            # Stay in current state while waiting — don't force IDLE
+            return
+
+        self._choose_action_legacy()
+
+    def _choose_action_legacy(self):
         self._last_active = time.time()
         self._idle_ticks  = 0
         is_wk, hr, mn    = self._get_time_info()
@@ -432,15 +551,29 @@ class Behavior:
             specials = [
                 State.DANCE, State.SCARE, State.YAWN, State.STRETCH,
                 State.CLEAN, State.JUMP, State.SIT, State.SCRATCH,
-                State.WAVE, State.HISS,
+                State.WAVE, State.HISS, State.CLINGING, State.CLIMBING,
             ]
             pick = random.choice(specials)
-            self.cat.set_state(pick)
-            self._play_ticks = random.randint(60, 150)
-            if pick == State.HISS:
-                self._sfx('hiss')
-            elif pick == State.SCARE:
-                self._sfx('chirp')
+            if pick == State.CLINGING:
+                self._start_clinging()
+            elif pick == State.CLIMBING:
+                self._start_climbing()
+            else:
+                self.cat.set_state(pick)
+                self._play_ticks = random.randint(60, 150)
+                if pick == State.HISS:
+                    self._sfx('hiss')
+                elif pick == State.SCARE:
+                    self._sfx('chirp')
+
+    def _start_climbing(self):
+        self.cat.snap_to_floor()
+        self.cat.set_state(State.CLIMBING)
+
+    def _start_clinging(self):
+        self._cling_ticks = 0
+        self.cat.snap_to_ceiling()
+        self.cat.set_state(State.CLINGING)
 
     def _start_zoomies(self):
         """Cat gets the zoomies — runs back and forth like a maniac."""

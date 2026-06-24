@@ -6,11 +6,28 @@ CONFIG_DIR  = os.path.join(os.path.expanduser('~'), '.mochi')
 CONFIG_PATH = os.path.join(CONFIG_DIR, 'config.json')
 
 DEFAULTS = {
+    # LLM
     'llm_url':           'https://api.groq.com/openai/v1',
     'llm_model':         'llama-3.3-70b-versatile',
     'llm_key':           '',
+    # General
     'sound_enabled':     True,
     'reminders_enabled': True,
+    # Persona
+    'pet_name':               'Mochi',
+    'pet_language':           'id',
+    'pet_personality':        'kucing virtual lucu, ramah, santai',
+    'system_prompt_override': '',
+    # LLM autonomous behavior
+    'llm_autonomous':         True,
+    'llm_action_cooldown':    45,   # seconds between LLM-driven actions
+    # Health reminders (minutes)
+    'health_enabled':         True,
+    'health_break_gap_min':   5,    # gap without typing = session reset
+    'health_eye_min':         20,
+    'health_water_min':       45,
+    'health_move_min':        90,
+    'health_posture_min':     120,
 }
 
 # Map config keys to env-var fallbacks (used only when the file has no value).

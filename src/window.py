@@ -7,6 +7,7 @@ from src.input_watcher import InputWatcher
 from src.tray import TrayIcon
 from src.sound import SoundPlayer
 from src.reminders import ReminderManager
+from src.health import HealthMonitor
 from src.llm import LLMClient, LLMError
 from src.config import Config
 
@@ -35,8 +36,10 @@ class PetWindow:
         self.config    = Config()
         self.cat       = Cat()
         self.sound     = SoundPlayer(enabled=self.config.get('sound_enabled'))
-        self.behavior  = Behavior(self.cat, sound=self.sound)
+        self.behavior  = Behavior(self.cat, sound=self.sound, config=self.config)
         self.reminders = ReminderManager(enabled=self.config.get('reminders_enabled'))
+        self.health    = HealthMonitor(config=self.config,
+                                       enabled=self.config.get('health_enabled'))
         self.llm       = LLMClient(config=self.config)
         self.settings_win = None
 
@@ -47,12 +50,23 @@ class PetWindow:
         # Chat state
         self._ask_dialog = None
         self._thinking   = False
+        def _on_typing():
+            self.behavior.notify_typing()
+            self.health.notify_activity()
+
+        def _on_click():
+            self.behavior.notify_click()
+            self.health.notify_activity()
+
         self.watcher  = InputWatcher(
-            on_typing=self.behavior.notify_typing,
-            on_click=self.behavior.notify_click,
+            on_typing=_on_typing,
+            on_click=_on_click,
             root=self.root
         )
         self.tray     = TrayIcon(self)
+
+        # Wire LLM autonomous behavior callback
+        self.behavior.on_need_llm_action = self._on_llm_action_needed
 
         self._drag_ox  = 0
         self._drag_oy  = 0
@@ -103,6 +117,14 @@ class PetWindow:
         self.config.save()
         return on
 
+    def toggle_health(self):
+        on = self.health.toggle()
+        self.config.set('health_enabled', on)
+        self.config.save()
+        if on:
+            self.health.reset_session()
+        return on
+
     def test_animation(self, state):
         self.behavior.force_action(state)
 
@@ -138,7 +160,7 @@ class PetWindow:
         win.protocol('WM_DELETE_WINDOW', on_close)
         win.bind('<Escape>', lambda _e: on_close())
 
-        tk.Label(win, text="Pengaturan AI 🤖", fg='#ffcc00', bg='#2b2b2b',
+        tk.Label(win, text="Pengaturan Mochi ⚙️", fg='#ffcc00', bg='#2b2b2b',
                  font=('Segoe UI', 12, 'bold')).grid(row=0, column=0, columnspan=2, pady=(0, 10), sticky='w')
 
         def field(row, label, value, show=None, width=40):
@@ -150,9 +172,19 @@ class PetWindow:
             e.grid(row=row + 1, column=0, columnspan=2, sticky='we', ipady=4)
             return e
 
-        url_e   = field(1, "Base URL (OpenAI-compatible):", self.config.get('llm_url'))
-        model_e = field(3, "Nama Model:", self.config.get('llm_model'))
-        key_e   = field(5, "API Key:", self.config.get('llm_key'), show='•')
+        # ── Persona ──────────────────────────────────────────────────────────
+        tk.Label(win, text="— Persona —", fg='#888', bg='#2b2b2b',
+                 font=('Segoe UI', 8)).grid(row=1, column=0, columnspan=2, sticky='w', pady=(4, 0))
+        name_e = field(2, "Nama kucing:", self.config.get('pet_name'), width=20)
+        personality_e = field(4, "Kepribadian (deskripsi singkat):",
+                              self.config.get('pet_personality'), width=40)
+
+        # ── AI / LLM ─────────────────────────────────────────────────────────
+        tk.Label(win, text="— AI / LLM —", fg='#888', bg='#2b2b2b',
+                 font=('Segoe UI', 8)).grid(row=7, column=0, columnspan=2, sticky='w', pady=(8, 0))
+        url_e   = field(8,  "Base URL (OpenAI-compatible):", self.config.get('llm_url'))
+        model_e = field(10, "Nama Model:", self.config.get('llm_model'))
+        key_e   = field(12, "API Key:", self.config.get('llm_key'), show='•')
 
         show_key = tk.IntVar(value=0)
         def toggle_key():
@@ -160,16 +192,26 @@ class PetWindow:
         tk.Checkbutton(win, text="Tampilkan key", variable=show_key, command=toggle_key,
                        fg='#aaa', bg='#2b2b2b', selectcolor='#2b2b2b',
                        activebackground='#2b2b2b', activeforeground='#fff',
-                       font=('Segoe UI', 8)).grid(row=7, column=0, sticky='w', pady=(2, 8))
+                       font=('Segoe UI', 8)).grid(row=14, column=0, sticky='w', pady=(2, 4))
+
+        autonomous_var = tk.IntVar(value=1 if self.config.get('llm_autonomous') else 0)
+        tk.Checkbutton(win, text="Kucing bergerak otomatis pakai AI (jika key diisi)",
+                       variable=autonomous_var,
+                       fg='#ccc', bg='#2b2b2b', selectcolor='#2b2b2b',
+                       activebackground='#2b2b2b', activeforeground='#fff',
+                       font=('Segoe UI', 8)).grid(row=15, column=0, columnspan=2, sticky='w', pady=(0, 8))
 
         status = tk.Label(win, text="", fg='#9ad', bg='#2b2b2b',
                           font=('Segoe UI', 8), wraplength=320, justify='left')
-        status.grid(row=9, column=0, columnspan=2, sticky='we', pady=(4, 6))
+        status.grid(row=16, column=0, columnspan=2, sticky='we', pady=(4, 6))
 
         def apply_fields():
-            self.config.set('llm_url',   url_e.get().strip())
-            self.config.set('llm_model', model_e.get().strip())
-            self.config.set('llm_key',   key_e.get().strip())
+            self.config.set('pet_name',        name_e.get().strip() or 'Mochi')
+            self.config.set('pet_personality', personality_e.get().strip())
+            self.config.set('llm_url',         url_e.get().strip())
+            self.config.set('llm_model',       model_e.get().strip())
+            self.config.set('llm_key',         key_e.get().strip())
+            self.config.set('llm_autonomous',  bool(autonomous_var.get()))
 
         def save():
             apply_fields()
@@ -183,7 +225,7 @@ class PetWindow:
 
             def worker():
                 try:
-                    self.llm.ask("ping")
+                    self.llm.ask("ping", add_to_history=False)
                     self.root.after(0, lambda: status.config(text="✓ Koneksi OK!", fg='#7d7'))
                 except LLMError as e:
                     msg = str(e)
@@ -191,7 +233,7 @@ class PetWindow:
             threading.Thread(target=worker, daemon=True).start()
 
         btns = tk.Frame(win, bg='#2b2b2b')
-        btns.grid(row=10, column=0, columnspan=2, pady=(4, 0), sticky='e')
+        btns.grid(row=17, column=0, columnspan=2, pady=(4, 0), sticky='e')
         tk.Button(btns, text="Tes Koneksi", bg='#3a7', fg='white', bd=0, width=11,
                   activebackground='#295', command=test_conn).pack(side='left', padx=4)
         tk.Button(btns, text="Simpan", bg='#4caf50', fg='white', bd=0, width=9,
@@ -340,6 +382,7 @@ class PetWindow:
             self._bubble = None
 
     def _force_sleep(self):
+        self.health.reset_session()
         self.behavior.force_sleep()
 
     def _show_pulang_popup(self):
@@ -378,6 +421,29 @@ class PetWindow:
         self.popup_open = False
         self.behavior.pulang_later()
 
+    # ── LLM autonomous action ────────────────────────────────────────────────
+
+    def _on_llm_action_needed(self, context):
+        if not self.llm.is_configured():
+            self.behavior.apply_llm_action_fallback()
+            return
+
+        def worker():
+            try:
+                result  = self.llm.ask_for_action(context)
+                action  = result.get('action', 'IDLE')
+                message = result.get('message', '')
+                self.root.after(0, lambda: self._apply_llm_action(action, message))
+            except Exception:
+                self.root.after(0, self.behavior.apply_llm_action_fallback)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_llm_action(self, action, message):
+        self.behavior.apply_llm_action(action)
+        if message:
+            self._show_bubble(message, duration_ms=5000)
+
     def _press(self, e):
         self._drag_ox  = e.x_root - self.cat.x
         self._drag_oy  = e.y_root - self.cat.y
@@ -399,13 +465,25 @@ class PetWindow:
             self.behavior.on_clicked()
         else:
             self._dragging = False
+            # Check if dropped near the top edge of the screen!
+            top_threshold = self.cat.screen_y + 15
+            if self.cat.y <= top_threshold:
+                self.cat.y = self.cat.screen_y
+                self.cat.set_state(State.CLINGING)
+                self._place()
+            # Check if dropped near the right edge of the screen!
+            elif self.cat.x >= self.cat.screen_w - self.cat.SPRITE_W - 20:
+                self.cat.x = self.cat.screen_w - self.cat.SPRITE_W
+                self.cat.set_state(State.CLIMBING)
+                self._place()
             # Check if dropped in the air, if so trigger falling physics!
-            floor = self.cat.screen_h - self.cat.SPRITE_H
-            if self.cat.y < floor - 2:
-                self.cat.set_state(State.FALLING)
             else:
-                self.cat.snap_to_floor()
-                self.behavior._choose_action()
+                floor = self.cat.screen_h - self.cat.SPRITE_H
+                if self.cat.y < floor - 2:
+                    self.cat.set_state(State.FALLING)
+                else:
+                    self.cat.snap_to_floor()
+                    self.behavior._choose_action()
 
     def _mouse_motion(self, e):
         if self._dragging:
@@ -459,6 +537,13 @@ class PetWindow:
         if due:
             self.behavior.remind()
             self._show_bubble(due)
+
+        # Health reminders (eye strain, water, stretch, posture)
+        health_due = self.health.check()
+        if health_due:
+            _, health_msg = health_due
+            self.behavior.remind()
+            self._show_bubble(health_msg, duration_ms=12000, wraplength=280)
 
         # Keep an active bubble glued above the cat; auto-dismiss when expired
         if self._bubble:
